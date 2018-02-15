@@ -23,14 +23,14 @@
 package socketio
 
 import (
-	"errors"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
-	"fmt"
 )
 
 type Session struct {
@@ -78,13 +78,16 @@ func NewSession(url string, version float64) (*Session, error) {
 
 		return &Session{id, heartbeatTimeout, connectionTimeout, supportedProtocols}, nil
 	} else {
+
+		//TODO: Is the length always 97 ??
 		buffer := strings.Trim(string(body), "97:0")
+		buffer = buffer[0:96]
 
 		type Handshake struct {
-			SID string `json:"sid"`
-			Upgrades []string `json:"upgrades"`
-			PingInterval int `json:"pingInterval"`
-			PingTimeout int `json:"pingTimeout"`
+			SID          string   `json:"sid"`
+			Upgrades     []string `json:"upgrades"`
+			PingInterval int      `json:"pingInterval"`
+			PingTimeout  int      `json:"pingTimeout"`
 		}
 
 		var hs Handshake

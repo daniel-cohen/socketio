@@ -2,9 +2,12 @@ package socketio
 
 import (
 	"errors"
-	"github.com/gorilla/websocket"
-	"strings"
 	"fmt"
+	"log"
+	"strings"
+	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 type SocketIO struct {
@@ -14,7 +17,7 @@ type SocketIO struct {
 	InputChannel      chan string
 	OutputChannel     chan Message
 	ConnectionChannel chan bool
-	Version float64
+	Version           float64
 
 	callbacks map[int]func(message []byte, output chan Message)
 
@@ -72,6 +75,16 @@ func ConnectToSocket(urlString string, socket *SocketIO) error {
 	socket.ConnectionChannel = make(chan bool)
 	defer close(socket.ConnectionChannel)
 
+	var ticker *time.Ticker
+	//ticker = time.NewTicker(connector.HandshakeTimeout)
+	ticker = time.NewTicker(10 * time.Second)
+
+	defer func() {
+		//TODO:
+		//ep.setReadDead()
+		ticker.Stop()
+	}()
+
 	go socket.readInput()
 
 	for {
@@ -98,6 +111,17 @@ func ConnectToSocket(urlString string, socket *SocketIO) error {
 				socket.ConnectionChannel <- false
 				return errors.New("io corrupted. can't continue")
 			}
+		case <-ticker.C:
+			//wt := ep.WriteTimeout
+			//if wt == 0 {
+			wt := 10 * time.Second
+			//}
+
+			log.Println("Sending PING")
+			if err := socket.Connection.WriteControl(websocket.PingMessage, nil, time.Now().Add(wt)); err != nil {
+				log.Println("error sending ping message:", err)
+				return err
+			}
 		}
 	}
 
@@ -105,6 +129,14 @@ func ConnectToSocket(urlString string, socket *SocketIO) error {
 }
 
 func (socket *SocketIO) readInput() {
+
+	socket.Connection.SetPongHandler(func(v string) error {
+		log.Println("pong:", v)
+		pongWait := socket.Context.ConnectionTimeout
+		socket.Connection.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+
 	for {
 		msgType, buffer, err := socket.Connection.ReadMessage()
 		if err != nil {
@@ -113,6 +145,9 @@ func (socket *SocketIO) readInput() {
 			}
 			break
 		}
+
+		log.Printf("msgType=%d", msgType)
+		log.Printf("received-->", string(buffer))
 		// fmt.Println("received-->", string(buffer))
 
 		if msgType == 1 && socket.Version == 0.9 {
@@ -165,7 +200,10 @@ func (socket *SocketIO) readInput() {
 			}
 
 		} else if msgType == 1 && socket.Version == 1 {
-			switch uint(buffer[0]) {
+			buff0 := uint8(buffer[0])
+			log.Printf("buff0 %d", buff0)
+
+			switch buff0 {
 			case 52:
 				if len(buffer) == 2 {
 					go socket.OnConnect(socket.OutputChannel)
@@ -176,7 +214,7 @@ func (socket *SocketIO) readInput() {
 							go eventFunction(eventMessage, socket.OutputChannel)
 							continue
 						}
-					} 
+					}
 					if socket.OnMessage != nil {
 						go socket.OnMessage(eventMessage, socket.OutputChannel)
 					}
@@ -189,8 +227,12 @@ func (socket *SocketIO) readInput() {
 
 func buildUrl(url string, endpoint string, version float64) string {
 	if version == 1 {
+		//TODO: if it contains https , it contains http too, so it will always go in the 1st condition:
 		if strings.Contains(url, "http") {
-			return strings.Replace(url, "http", "ws", 1) + "/socket.io/?transport=websocket&sid=" + endpoint
+			//TODO:
+			//return strings.Replace(url, "http", "ws", 1) + "/socket.io/?transport=websocket&sid=" + endpoint
+			return strings.Replace(url, "http", "ws", 1) + "/socket.io/?EIO=3&transport=websocket"
+
 		} else if strings.Contains(url, "https") {
 			return strings.Replace(url, "https", "wss", 1) + "/socket.io/?transport=websocket&sid=" + endpoint
 		}
@@ -200,6 +242,6 @@ func buildUrl(url string, endpoint string, version float64) string {
 		} else if strings.Contains(url, "https") {
 			return strings.Replace(url, "https", "wss", 1) + "/socket.io/1/websocket/" + endpoint
 		}
-	} 
+	}
 	return url
 }
